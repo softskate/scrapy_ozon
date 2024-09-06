@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
 import json
 import time
+from peewee import fn
 from database import ParsingItem, App, Crawl, db, Product
-from parse import Parser
+from parse import Parser, get_unit_products, AISimilar
 
 
 parser = Parser()
+ai = AISimilar()
 
 def run_spider():
     while True:
@@ -56,7 +58,23 @@ def run_spider():
         db.connect(True)
         crawl.finished = True
         crawl.save()
-        db.close()
+
+        for uprod in get_unit_products():
+            query = (Product
+                .select()
+                .where(
+                    (fn.similarity(Product.name, uprod['name']) >= 0.8) & 
+                    (Product.crawlid == crawl) & 
+                    (Product.price < uprod['price']*1.01)
+                )
+            )
+            if query:
+                similar = ai.check_products(query)
+                # TODO: similar => [<productId>, ...]. Connect with uprod article
+
+                
+
+
         
         time.sleep(60*60)
 

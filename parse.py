@@ -1,9 +1,12 @@
 import json
 import time
 import requests
+import google.generativeai as genai
 from database import Product, Crawl
 from database import Product, ProductDetails
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+from keys import *
 
 
 CHAT_ID = -4125682328
@@ -146,3 +149,40 @@ class Parser:
         item["description"] = desc
         item["details"] = details
         ProductDetails.create(**item)
+
+
+def get_unit_products():
+    unit_resp = requests.post('http://92.53.64.89:9011/get_products', json={"key": UNIT_KEY})
+    unit_resp = [x for x in unit_resp.json() if x['price'] and x['name']]
+    return unit_resp
+
+
+genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel()
+class AISimilar:
+    def __init__(self):
+        msg = ('Есть список электроники в таком виде:\n'
+                '21: iPhone 14 pro max 256GB\n'
+                '52: iPhone 14 promax 256GB\n'
+                '36: iPhone 14 pro 256GB\n'
+                '13: iPhone 14 pro max 128GB\n'
+                '85: iPhone 14 pro max 256\n'
+                'Образец: iPhone 14 Pro Max 256GB\n'
+                'Из списка надо найти те которые '
+                'один и тот же вешь с образцом и в ответе '
+                'отправить json со списком нумерации '
+                'подходящих товаров если они есть как это:\n'
+                '[21, 52, 85]')
+
+        self.chat = model.start_chat(history=[
+                {"role": "model", "parts": [msg]}
+            ])
+
+
+    def check_products(self, likes, uprod) -> list:
+        likes = [f"{x.productId}: {x.name}" for x in likes]
+        likes.append(f"Образец: {uprod['name']}")
+        response = self.chat.send_message({"role": "user", "parts": likes})
+        return json.loads(response)
+
+
