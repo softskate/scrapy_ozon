@@ -3,15 +3,10 @@ import time
 import requests
 import google.generativeai as genai
 from database import Product, Crawl
-from database import Product, ProductDetails
+from database import Product, ProductDetails, Similarity
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from keys import *
-
-
-CHAT_ID = -4125682328
-BOT_TOKEN = '6295318943:AAHGQ3dLYu-sFWsa0M3__qOwKW7wqnxOxwE'
-notify_url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage'
 
 
 def remove_url_parameter(url, param_to_remove):
@@ -91,7 +86,34 @@ class Parser:
                 if img['type'] == 'image':
                     image = img['image']['link']
                     break
+            
+            uprod = Similarity.get_or_none((Similarity.productId == sku) & ((Similarity.uprice*1.01) >= price))
+            if uprod:
+                text = (
+                    f"<b>Ozon</b>\n\n"
+                    f"<b>Наименование:</b> <a href='{link}'>{name}</a>\n"
+                    f"<b>Цена на юнитке</b>: {uprod.uprice}\n<b>Цена на Ozon</b>: {price}"
+                )
+                # Parameters to be sent with the request
+                params = {
+                    'chat_id': CHAT_ID,
+                    'text': text,
+                    'parse_mode': 'HTML'
+                }
 
+                # Send the message
+                try:
+                    response = requests.get(URL, params=params)
+                    result = response.json()
+                    if result['ok']:
+                        print("Message sent successfully.")
+                    else:
+                        print("Failed to send message:", result['description'])
+                except Exception as e:
+                    print(f"Failed to send message: {e}")
+
+            
+            Product.get_or_none(crawlid)
             item = {}
             item["appid"] = appid
             item["crawlid"] = crawlid
@@ -153,8 +175,13 @@ class Parser:
 
 def get_unit_products():
     unit_resp = requests.post('http://92.53.64.89:9011/get_products', json={"key": UNIT_KEY})
-    unit_resp = [x for x in unit_resp.json() if x['price'] and x['name']]
-    return unit_resp
+    out = []
+    for uprod in unit_resp.json():
+        if uprod['price'] and uprod['name']:
+            uprod['price'] = int(uprod['price'])
+            out.append(uprod)
+
+    return out
 
 
 genai.configure(api_key=GOOGLE_API_KEY)

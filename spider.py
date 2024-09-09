@@ -1,13 +1,19 @@
 from datetime import datetime, timedelta
 import json
 import time
-from peewee import fn
-from database import ParsingItem, App, Crawl, db, Product
+from difflib import SequenceMatcher
+from peewee import fn, JOIN
+from database import ParsingItem, App, Crawl, Product, Similarity, db
 from parse import Parser, get_unit_products, AISimilar
 
 
 parser = Parser()
 ai = AISimilar()
+
+
+def similarity(a, b):
+    return SequenceMatcher(None, a, b).ratio()
+
 
 def run_spider():
     while True:
@@ -17,25 +23,9 @@ def run_spider():
             .delete()
             .where(Product.crawlid.in_(old_crawlers)))
         dq.execute()
-        try:
-            urls = json.loads(open(f'tasks.json', 'rb').read())
-            if not urls: raise FileNotFoundError
-            
-            crawl: Crawl = (
-                Crawl
-                .select()
-                .where(Crawl.finished == False)
-                .order_by(Crawl.created_at.desc())
-                .first()
-            )
-        except FileNotFoundError:
-            urls = [x.link for x in ParsingItem.select()]
-            crawl = Crawl.create()
-
+        urls = [x.link for x in ParsingItem.select()]
+        crawl = Crawl.create()
         crawlid = crawl.get_id()
-        db.close()
-        open('tasks.json', 'w', -1, 'utf8').write(json.dumps(urls))
-
         while urls:
             scrape_url = urls.pop()
             app = App.create(
@@ -52,7 +42,6 @@ def run_spider():
                     print(f'Error occurred while scraping: {e}')
                     time.sleep(5)
 
-            open('tasks.json', 'w', -1, 'utf8').write(json.dumps(urls))
             time.sleep(60)
 
         db.connect(True)
@@ -60,26 +49,33 @@ def run_spider():
         crawl.save()
 
         for uprod in get_unit_products():
+            for old_prod in Similarity.select().where(Similarity.unitArticle == uprod['article']):
+                if old_prod.uprice != uprod['price']:
+                    old_prod.uprice = uprod['price']
+
             query = (Product
                 .select()
+                .join(Similarity, JOIN.LEFT_OUTER, on=(Similarity.productId == Product.productId))
                 .where(
-                    (fn.similarity(Product.name, uprod['name']) >= 0.8) & 
-                    (Product.crawlid == crawl) & 
-                    (Product.price < uprod['price']*1.01)
+                    (fn.similarity(Product.name, uprod['name']) >= 0.7)
+                     & (Product.crawlid == crawl)
+                     & (Similarity.unitArticle != uprod['article'])
                 )
             )
             if query:
                 similar = ai.check_products(query)
-                # TODO: similar => [<productId>, ...]. Connect with uprod article
-
-                
-
-
+                for productId in similar:
+                    Similarity.create(
+                        productId = productId,
+                        unitArticle = uprod['article'],
+                        uprice = uprod['price']
+                    )
         
         time.sleep(60*60)
 
 
 if __name__ == '__main__':
+    db.register_function(similarity, 'similarity', 2)
     while True:
         try: run_spider()
         except Exception as e: print(f'Unexpected exception occurred {e}')

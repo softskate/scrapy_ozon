@@ -66,7 +66,14 @@ class ProductDetails(BaseModel):
     description = TextField()
 
 
-if __name__ == "__main__" or not db.table_exists(Product):
+
+class Similarity(BaseModel):
+    productId = CharField(20)
+    unitArticle = CharField(10)
+    uprice = IntegerField()
+
+
+if __name__ == "__main__" or not all([db.table_exists(table) for table in BaseModel.__subclasses__()]):
     db.create_tables(BaseModel.__subclasses__())
     db.close()
 
